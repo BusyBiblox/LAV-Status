@@ -1,73 +1,61 @@
-import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import fetch from 'node-fetch';
-import express from 'express';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const CHANNEL_ID = process.env.CHANNEL_ID;
-const CONNECT_URL = process.env.CONNECT_URL || 'https://busybiblox.github.io/LAV-Redirect/';
-const SERVER_IP = process.env.SERVER_IP;
-const SERVER_PORT = process.env.SERVER_PORT;
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
-});
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Express keep-alive route
-app.get('/', (req, res) => {
-  res.send('Bot is alive!');
-});
-
-app.listen(PORT, () => {
-  console.log(`Keep-alive server listening on port ${PORT}`);
-});
+const channelId = process.env.CHANNEL_ID;
+const connectUrl = process.env.CONNECT_URL;
+const serverIp = process.env.SERVER_IP;
+const serverPort = process.env.SERVER_PORT;
 
 async function updateStatusMessage() {
-  const channel = await client.channels.fetch(CHANNEL_ID);
-  if (!channel) {
-    console.error('Channel not found');
-    return;
-  }
-
   try {
-    // Fetch server info and players
-    const infoResponse = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/info.json`);
-    const infoData = await infoResponse.json();
+    const infoRes = await fetch(`http://${serverIp}:${serverPort}/info.json`);
+    const infoData = await infoRes.json();
 
-    const playersResponse = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/players.json`);
-    const playersData = await playersResponse.json();
+    const playersRes = await fetch(`http://${serverIp}:${serverPort}/players.json`);
+    const playersData = await playersRes.json();
 
-    const maxPlayers = infoData.vars.sv_maxClients || 'Unknown';
+    const maxPlayers = infoData.vars.sv_maxClients || 0;
     const currentPlayers = playersData.length || 0;
-    const serverName = infoData.vars.sv_projectName || 'Server';
 
-    // Check if server is online
-    const statusText = infoResponse.ok ? 'Online' : 'Offline';
+    const serverOnline = currentPlayers > 0 || maxPlayers > 0;
+
+    // Color green if online, red if offline
+    const statusColor = serverOnline ? 0x57f287 : 0xed4245; 
 
     const embed = new EmbedBuilder()
-      .setTitle(`${serverName} Status`)
-      .setDescription(
-        `Status: **${statusText}**\nPlayers: **${currentPlayers}/${maxPlayers}**\n[Connect](${CONNECT_URL})`
+      .setTitle('LAV Server Status')
+      .setDescription(serverOnline ? '🟢 Online' : '🔴 Offline')
+      .addFields(
+        { name: 'Players', value: `${currentPlayers} / ${maxPlayers}`, inline: true },
       )
-      .setColor(statusText === 'Online' ? 0x00ff00 : 0xff0000)
-      .setImage('https://i.imgur.com/5OrBONg.png') // Your custom image here
+      .setColor(statusColor)
+      .setThumbnail('https://i.imgur.com/5OrBONg.png') // your server image
+      .setFooter({ text: 'Last updated' })
       .setTimestamp();
 
-    // Fetch existing bot message to edit or send new
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel('🎮 Connect')
+        .setStyle(ButtonStyle.Link)
+        .setURL(connectUrl)
+    );
+
+    const channel = await client.channels.fetch(channelId);
     const messages = await channel.messages.fetch({ limit: 10 });
-    const botMessage = messages.find((msg) => msg.author.id === client.user.id);
+    const botMessage = messages.find(m => m.author.id === client.user.id);
 
     if (botMessage) {
-      await botMessage.edit({ embeds: [embed] });
+      await botMessage.edit({ embeds: [embed], components: [row] });
     } else {
-      await channel.send({ embeds: [embed] });
+      await channel.send({ embeds: [embed], components: [row] });
     }
-
+    
+    console.log('Status message updated');
   } catch (error) {
     console.error('Failed to fetch server data:', error);
   }
@@ -75,9 +63,8 @@ async function updateStatusMessage() {
 
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
-
-  updateStatusMessage(); // Initial update
-  setInterval(updateStatusMessage, 15 * 60 * 1000); // Update every 15 minutes
+  updateStatusMessage();
+  setInterval(updateStatusMessage, 15 * 60 * 1000); // every 15 minutes
 });
 
-client.login(BOT_TOKEN);
+client.login(process.env.BOT_TOKEN);
