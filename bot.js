@@ -1,97 +1,76 @@
-import dotenv from 'dotenv';
+import Discord from "discord.js";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
 dotenv.config();
 
-import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
-import fetch from 'node-fetch';
+const client = new Discord.Client({
+  intents: ["Guilds", "GuildMessages", "MessageContent"],
+});
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
+const BOT_TOKEN = process.env.BOT_TOKEN;
 const SERVER_IP = process.env.SERVER_IP;
 const SERVER_PORT = process.env.SERVER_PORT;
-
-// Status image URL you wanted to add
-const STATUS_IMAGE_URL = 'https://i.imgur.com/5OrBONg.png';
-
-// Construct your server URLs (using HTTP due to SSL issues)
-const INFO_URL = `http://${SERVER_IP}:${SERVER_PORT}/info.json`;
-const PLAYERS_URL = `http://${SERVER_IP}:${SERVER_PORT}/players.json`;
-
-let statusMessage;
+const CONNECT_URL = "https://busybiblox.github.io/LAV-Redirect/"; // hardcoded or use env var if you want
 
 async function updateStatusMessage() {
   try {
-    // Fetch info.json
-    const infoRes = await fetch(INFO_URL);
-    if (!infoRes.ok) throw new Error(`Info fetch failed with status ${infoRes.status}`);
-    const info = await infoRes.json();
+    // Fetch server info
+    const infoRes = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/info.json`);
+    if (!infoRes.ok) throw new Error(`Info fetch failed: ${infoRes.status}`);
 
-    // Fetch players.json
-    const playersRes = await fetch(PLAYERS_URL);
-    if (!playersRes.ok) throw new Error(`Players fetch failed with status ${playersRes.status}`);
-    const players = await playersRes.json();
+    const infoData = await infoRes.json();
 
-    const maxPlayers = info.vars?.sv_maxClients || 'unknown';
-    const playerCount = players.length;
+    // Fetch players info
+    const playersRes = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/players.json`);
+    if (!playersRes.ok) throw new Error(`Players fetch failed: ${playersRes.status}`);
 
-    // Determine server status (online if fetched successfully)
-    const serverStatus = 'Online';
+    const playersData = await playersRes.json();
 
-    // Prepare the embed with updated info and image
-    const embed = new EmbedBuilder()
-      .setTitle('LAV Server Status')
-      .setColor(playerCount > 0 ? 0x00ff00 : 0xff0000) // green if players online, red otherwise
-      .addFields(
-        { name: 'Status', value: serverStatus, inline: true },
-        { name: 'Players', value: `${playerCount} / ${maxPlayers}`, inline: true }
+    const maxPlayers = infoData.vars.sv_maxClients || 0;
+    const currentPlayers = playersData.length;
+    const isOnline = infoRes.ok;
+
+    const embed = new Discord.MessageEmbed()
+      .setTitle("Server Status")
+      .setDescription(
+        isOnline
+          ? `🟢 Online\nPlayers: **${currentPlayers}/${maxPlayers}**`
+          : "🔴 Offline"
       )
-      .setImage(STATUS_IMAGE_URL)
-      .setTimestamp();
+      .setColor(isOnline ? "GREEN" : "RED")
+      .setThumbnail("https://i.imgur.com/5OrBONg.png") // Your image link
+      .setFooter({ text: "Updated every 15 minutes" });
 
-    // Edit existing message or send new one
-    if (!statusMessage) {
-      const channel = await client.channels.fetch(CHANNEL_ID);
-      statusMessage = await channel.send({ embeds: [embed] });
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    if (!channel) return console.error("Channel not found");
+
+    // Find existing bot message
+    const messages = await channel.messages.fetch({ limit: 50 });
+    const botMessage = messages.find(
+      (m) => m.author.id === client.user.id && m.embeds.length > 0
+    );
+
+    const connectButton = new Discord.MessageActionRow().addComponents(
+      new Discord.MessageButton()
+        .setLabel("Connect")
+        .setStyle("LINK")
+        .setURL(CONNECT_URL)
+    );
+
+    if (botMessage) {
+      await botMessage.edit({ embeds: [embed], components: [connectButton] });
     } else {
-      await statusMessage.edit({ embeds: [embed] });
+      await channel.send({ embeds: [embed], components: [connectButton] });
     }
   } catch (error) {
-    console.error('Failed to fetch server data:', error);
-
-    // Show offline status in embed on failure
-    const embed = new EmbedBuilder()
-      .setTitle('LAV Server Status')
-      .setColor(0xff0000)
-      .addFields(
-        { name: 'Status', value: 'Offline', inline: true },
-        { name: 'Players', value: '0 / 0', inline: true }
-      )
-      .setImage(STATUS_IMAGE_URL)
-      .setTimestamp();
-
-    if (!statusMessage) {
-      const channel = await client.channels.fetch(CHANNEL_ID);
-      statusMessage = await channel.send({ embeds: [embed] });
-    } else {
-      await statusMessage.edit({ embeds: [embed] });
-    }
+    console.error("Failed to fetch server data:", error);
   }
 }
 
-client.once('ready', async () => {
+client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Fetch the first status message in the channel if any, so we can edit it
-  try {
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    const messages = await channel.messages.fetch({ limit: 10 });
-    statusMessage = messages.find(msg => msg.author.id === client.user.id);
-  } catch (e) {
-    console.warn('Could not fetch messages in channel:', e);
-  }
-
-  // Update immediately
   await updateStatusMessage();
 
   // Update every 15 minutes
