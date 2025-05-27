@@ -1,71 +1,98 @@
 import { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
-import express from 'express';
 import fetch from 'node-fetch';
+import dotenv from 'dotenv';
+dotenv.config();
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const BOT_TOKEN = process.env.BOT_TOKEN;
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
 const CHANNEL_ID = process.env.CHANNEL_ID;
-const SERVER_IP = '104.243.32.183';   // Replace with your FiveM server IP
-const SERVER_PORT = '25001';           // Replace with your FiveM server port
-const CONNECT_URL = 'https://busybiblox.github.io/LAV-Redirect/';  // Your redirect URL
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const SERVER_IP = process.env.SERVER_IP;          // e.g. "104.243.32.183"
+const SERVER_PORT = process.env.SERVER_PORT;      // e.g. "25001"
+const CONNECT_URL = process.env.CONNECT_URL || "https://busybiblox.github.io/LAV-Redirect/"; 
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+let statusMessage;
 
-let statusMessageId;
-
-async function updateStatusMessage() {
+async function getServerInfo() {
   try {
     const res = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/info.json`);
-    const data = await res.json();
+    if (!res.ok) throw new Error('Info endpoint unreachable');
+    return await res.json();
+  } catch {
+    return null;  // server offline or error
+  }
+}
 
-    const isOnline = data ? true : false;
-    const playerCount = data.clients ?? 0;
-    const maxPlayers = data.sv_maxclients ?? 0;
+async function getPlayerCount() {
+  try {
+    const res = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/players.json`);
+    if (!res.ok) throw new Error('Players endpoint unreachable');
+    const players = await res.json();
+    return players.length;
+  } catch {
+    return null;  // no players info available or error
+  }
+}
 
-    const statusEmbed = new EmbedBuilder()
-      .setTitle('FiveM Server Status')
-      .setDescription(isOnline
-        ? `🟢 Server is **ONLINE**\nPlayers: ${playerCount} / ${maxPlayers}`
-        : '🔴 Server is **OFFLINE**')
-      .setColor(isOnline ? 0x00ff00 : 0xff0000) // Green if online, red if offline
-      .setTimestamp(new Date())
-      .setImage('https://imgur.com/a/GTl1yW8')  // Change this to your own image URL
-      .setFooter({ text: 'Updated every 15 minutes' });
+async function updateStatusMessage() {
+  const serverInfo = await getServerInfo();
+  if (!serverInfo) {
+    // Server offline
+    const offlineEmbed = new EmbedBuilder()
+      .setTitle('Server Status: Offline ❌')
+      .setDescription('The FiveM server is currently offline.')
+      .setColor('Red');
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setLabel('Connect to Server')
-        .setStyle(ButtonStyle.Link)
-        .setURL(CONNECT_URL)
-    );
+    const button = new ButtonBuilder()
+      .setLabel('Connect to Server')
+      .setStyle(ButtonStyle.Link)
+      .setURL(CONNECT_URL);
 
-    const channel = await client.channels.fetch(CHANNEL_ID);
+    const row = new ActionRowBuilder().addComponents(button);
 
-    if (statusMessageId) {
-      // Edit existing message
-      const message = await channel.messages.fetch(statusMessageId);
-      await message.edit({ embeds: [statusEmbed], components: [row] });
+    if (statusMessage) {
+      await statusMessage.edit({ embeds: [offlineEmbed], components: [row] });
     } else {
-      // Send new message and save message ID
-      const message = await channel.send({ embeds: [statusEmbed], components: [row] });
-      statusMessageId = message.id;
+      const channel = await client.channels.fetch(CHANNEL_ID);
+      statusMessage = await channel.send({ embeds: [offlineEmbed], components: [row] });
     }
-  } catch (error) {
-    console.error('Error updating server status:', error);
+    return;
+  }
+
+  // Server online
+  const maxPlayers = parseInt(serverInfo.vars.sv_maxClients, 10) || 0;
+  const currentPlayers = await getPlayerCount();
+
+  const onlineEmbed = new EmbedBuilder()
+    .setTitle('Server Status: Online ✅')
+    .setDescription(`**${currentPlayers ?? '?'}** / **${maxPlayers}** players online`)
+    .setColor('Green')
+    .setFooter({ text: serverInfo.vars.sv_projectName || 'FiveM Server' })
+    .setThumbnail('https://cdn.discordapp.com/attachments/1104565371184221440/1119583813102917650/LAV-Banner-Red.png'); // Update with your server image URL
+
+  const button = new ButtonBuilder()
+    .setLabel('Connect to Server')
+    .setStyle(ButtonStyle.Link)
+    .setURL(CONNECT_URL);
+
+  const row = new ActionRowBuilder().addComponents(button);
+
+  if (statusMessage) {
+    await statusMessage.edit({ embeds: [onlineEmbed], components: [row] });
+  } else {
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    statusMessage = await channel.send({ embeds: [onlineEmbed], components: [row] });
   }
 }
 
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // Run immediately, then every 15 minutes
+  // Initial message
   await updateStatusMessage();
+
+  // Update every 15 minutes
   setInterval(updateStatusMessage, 15 * 60 * 1000);
 });
-
-// Express server to keep bot alive on hosting platforms like Render or Replit
-app.get('/', (req, res) => res.send('Bot is running'));
-app.listen(PORT, () => console.log(`Web server running on port ${PORT}`));
 
 client.login(BOT_TOKEN);
