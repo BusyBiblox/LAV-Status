@@ -1,67 +1,83 @@
-import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import fetch from 'node-fetch';
+import express from 'express';
 import dotenv from 'dotenv';
+
 dotenv.config();
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-});
-
-const CHANNEL_ID = process.env.CHANNEL_ID;
 const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHANNEL_ID = process.env.CHANNEL_ID;
+const CONNECT_URL = process.env.CONNECT_URL || 'https://busybiblox.github.io/LAV-Redirect/';
 const SERVER_IP = process.env.SERVER_IP;
 const SERVER_PORT = process.env.SERVER_PORT;
-const CONNECT_URL = 'https://busybiblox.github.io/LAV-Redirect/';
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+});
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Express keep-alive route
+app.get('/', (req, res) => {
+  res.send('Bot is alive!');
+});
+
+app.listen(PORT, () => {
+  console.log(`Keep-alive server listening on port ${PORT}`);
+});
 
 async function updateStatusMessage() {
+  const channel = await client.channels.fetch(CHANNEL_ID);
+  if (!channel) {
+    console.error('Channel not found');
+    return;
+  }
+
   try {
-    const infoRes = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/info.json`);
-    if (!infoRes.ok) throw new Error(`Info fetch failed: ${infoRes.status}`);
-    const infoData = await infoRes.json();
+    // Fetch server info and players
+    const infoResponse = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/info.json`);
+    const infoData = await infoResponse.json();
 
-    const playersRes = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/players.json`);
-    if (!playersRes.ok) throw new Error(`Players fetch failed: ${playersRes.status}`);
-    const playersData = await playersRes.json();
+    const playersResponse = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/players.json`);
+    const playersData = await playersResponse.json();
 
-    const maxPlayers = infoData.vars.sv_maxClients || 0;
-    const currentPlayers = playersData.length;
+    const maxPlayers = infoData.vars.sv_maxClients || 'Unknown';
+    const currentPlayers = playersData.length || 0;
+    const serverName = infoData.vars.sv_projectName || 'Server';
+
+    // Check if server is online
+    const statusText = infoResponse.ok ? 'Online' : 'Offline';
 
     const embed = new EmbedBuilder()
-      .setTitle('Server Status')
-      .setDescription(`🟢 Online\nPlayers: **${currentPlayers}/${maxPlayers}**`)
-      .setColor(0x00ff00)
-      .setThumbnail('https://i.imgur.com/5OrBONg.png')
-      .setFooter({ text: 'Updated every 15 minutes' });
+      .setTitle(`${serverName} Status`)
+      .setDescription(
+        `Status: **${statusText}**\nPlayers: **${currentPlayers}/${maxPlayers}**\n[Connect](${CONNECT_URL})`
+      )
+      .setColor(statusText === 'Online' ? 0x00ff00 : 0xff0000)
+      .setImage('https://i.imgur.com/5OrBONg.png') // Your custom image here
+      .setTimestamp();
 
-    const channel = await client.channels.fetch(CHANNEL_ID);
-    if (!channel) return console.error('Channel not found');
-
-    const messages = await channel.messages.fetch({ limit: 50 });
-    const botMessage = messages.find(
-      (m) => m.author.id === client.user.id && m.embeds.length > 0
-    );
-
-    const connectButton = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setLabel('Connect')
-        .setStyle(ButtonStyle.Link)
-        .setURL(CONNECT_URL)
-    );
+    // Fetch existing bot message to edit or send new
+    const messages = await channel.messages.fetch({ limit: 10 });
+    const botMessage = messages.find((msg) => msg.author.id === client.user.id);
 
     if (botMessage) {
-      await botMessage.edit({ embeds: [embed], components: [connectButton] });
+      await botMessage.edit({ embeds: [embed] });
     } else {
-      await channel.send({ embeds: [embed], components: [connectButton] });
+      await channel.send({ embeds: [embed] });
     }
+
   } catch (error) {
     console.error('Failed to fetch server data:', error);
   }
 }
 
-client.once('ready', async () => {
+client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
-  await updateStatusMessage();
-  setInterval(updateStatusMessage, 15 * 60 * 1000);
+
+  updateStatusMessage(); // Initial update
+  setInterval(updateStatusMessage, 15 * 60 * 1000); // Update every 15 minutes
 });
 
 client.login(BOT_TOKEN);
