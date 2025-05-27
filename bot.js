@@ -1,12 +1,12 @@
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import fetch from 'node-fetch';
 
-const TOKEN = process.env.TOKEN;
+const TOKEN = process.env.BOT_TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
-const SERVER_STATUS_URL = process.env.SERVER_STATUS_URL;
+const SERVER_STATUS_URL = process.env.CONNECT_URL;
 
 if (!TOKEN || !CHANNEL_ID || !SERVER_STATUS_URL) {
-  console.error('Missing environment variables!');
+  console.error('Missing environment variables! Make sure BOT_TOKEN, CHANNEL_ID, and CONNECT_URL are set.');
   process.exit(1);
 }
 
@@ -22,7 +22,7 @@ async function updateStatusMessage() {
 
     const data = await response.json();
 
-    // Calculate player counts properly
+    // Extract players and max players correctly
     const maxPlayers = parseInt(data.vars?.sv_maxClients) || 0;
     const players = data.clients ?? 0;
 
@@ -34,10 +34,10 @@ async function updateStatusMessage() {
       .addFields(
         { name: 'Players', value: `${players} / ${maxPlayers}`, inline: true }
       )
-      .setImage('https://i.imgur.com/5OrBONg.png') // Your image URL here
+      .setImage('https://i.imgur.com/5OrBONg.png') // Server image
       .setTimestamp();
 
-    // Find the previous bot message to edit, or send a new one
+    // Fetch last 10 messages to find bot's own message
     const messages = await channel.messages.fetch({ limit: 10 });
     const botMessage = messages.find(msg => msg.author.id === client.user.id);
 
@@ -46,7 +46,6 @@ async function updateStatusMessage() {
     } else {
       await channel.send({ embeds: [embed] });
     }
-
   } catch (error) {
     console.error('Failed to fetch server data:', error);
   }
