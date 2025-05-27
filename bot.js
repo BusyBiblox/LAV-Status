@@ -1,75 +1,70 @@
+import 'dotenv/config';
 import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
 import fetch from 'node-fetch';
-import dotenv from 'dotenv';
-dotenv.config();
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
+const TOKEN = process.env.TOKEN;
 const CHANNEL_ID = process.env.CHANNEL_ID;
-const SERVER_STATUS_URL = process.env.SERVER_STATUS_URL; // Your JSON API URL
+const SERVER_STATUS_URL = process.env.SERVER_STATUS_URL;
 
-async function updateStatusMessage() {
-  const channel = await client.channels.fetch(CHANNEL_ID);
-  if (!channel) {
-    console.error('Channel not found');
-    return;
-  }
-
-  // Fetch server data
-  let data;
-  try {
-    const res = await fetch(SERVER_STATUS_URL);
-    data = await res.json();
-  } catch (err) {
-    console.error('Failed to fetch server data:', err);
-    return;
-  }
-
-  const maxPlayers = data.vars?.sv_maxClients || 'Unknown';
-  const currentPlayers = data.resources?.length || 0; // Adjust this based on actual player count field
-  const isOnline = !!data.server;
-
-  // Find bot's message
-  const messages = await channel.messages.fetch({ limit: 50 });
-  let statusMessage = messages.find(msg => msg.author.id === client.user.id);
-
-  if (!statusMessage) {
-    console.log('Status message not found. Sending a new one...');
-    const embed = new EmbedBuilder()
-      .setTitle('Server Status')
-      .setDescription('Fetching server status...')
-      .setColor(0xffff00)
-      .setImage('https://i.imgur.com/5OrBONg.png'); // Your image URL
-
-    statusMessage = await channel.send({ embeds: [embed] });
-    console.log('New status message sent:', statusMessage.id);
-    return; // will update content on next run
-  }
-
-  // Build embed
-  const embed = new EmbedBuilder()
-    .setTitle('LAV Server Status')
-    .setColor(isOnline ? 0x00ff00 : 0xff0000)
-    .addFields(
-      { name: 'Status', value: isOnline ? '🟢 Online' : '🔴 Offline', inline: true },
-      { name: 'Players', value: `${currentPlayers} / ${maxPlayers}`, inline: true },
-    )
-    .setImage('https://i.imgur.com/5OrBONg.png')
-    .setTimestamp();
-
-  // Edit existing message
-  await statusMessage.edit({ embeds: [embed] });
-  console.log('Status message updated');
+if (!TOKEN || !CHANNEL_ID || !SERVER_STATUS_URL) {
+  console.error('ERROR: Missing one or more environment variables: TOKEN, CHANNEL_ID, SERVER_STATUS_URL');
+  process.exit(1);
 }
 
-client.once('ready', () => {
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+
+async function updateStatusMessage() {
+  try {
+    const res = await fetch(SERVER_STATUS_URL);
+    if (!res.ok) {
+      throw new Error(`HTTP error! Status: ${res.status}`);
+    }
+    const data = await res.json();
+
+    // Extract player count info from your JSON structure
+    const players = data.players ?? data.vars?.sv_maxClients ?? 0;
+    const maxPlayers = data.vars?.sv_maxClients ?? 0;
+
+    const isOnline = players > 0;
+
+    const embed = new EmbedBuilder()
+      .setTitle('LAV Server Status')
+      .setDescription(isOnline ? '🟢 **Online**' : '🔴 **Offline**')
+      .addFields(
+        { name: 'Players', value: `${players} / ${maxPlayers}`, inline: true }
+      )
+      .setImage('https://i.imgur.com/5OrBONg.png')
+      .setTimestamp()
+      .setFooter({ text: 'Updated every 15 minutes' });
+
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    if (!channel) {
+      console.error('Channel not found.');
+      return;
+    }
+
+    // Find existing bot status message to edit it, or send a new one
+    const messages = await channel.messages.fetch({ limit: 20 });
+    const botMessage = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
+
+    if (botMessage) {
+      await botMessage.edit({ embeds: [embed] });
+      console.log('Status message updated.');
+    } else {
+      await channel.send({ embeds: [embed] });
+      console.log('Status message sent.');
+    }
+  } catch (error) {
+    console.error('Failed to fetch server data:', error);
+  }
+}
+
+client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}`);
+  await updateStatusMessage();
 
-  // Initial update
-  updateStatusMessage();
-
-  // Repeat every 15 minutes
+  // Update every 15 minutes
   setInterval(updateStatusMessage, 15 * 60 * 1000);
 });
 
-client.login(process.env.BOT_TOKEN);
+client.login(TOKEN);
