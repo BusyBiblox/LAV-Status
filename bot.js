@@ -56,7 +56,7 @@ async function updateStatusMessage() {
     const connectButton = new ButtonBuilder()
       .setLabel('Connect to Server')
       .setStyle(ButtonStyle.Link)
-      .setURL(`fivem://connect/${SERVER_IP}`);
+      .setURL(`https://busybiblox.github.io/LAV-Redirect/`);
     row.addComponents(connectButton);
   }
 
