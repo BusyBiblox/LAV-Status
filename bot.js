@@ -1,84 +1,50 @@
-import { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
-import fetch from 'node-fetch';
-import dotenv from 'dotenv';
-dotenv.config();
+import { Client, GatewayIntentBits, ButtonBuilder, ActionRowBuilder, ButtonStyle } from 'discord.js';
+import express from 'express';
+
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const CHANNEL_ID = process.env.CHANNEL_ID;
+// Use the env var, fallback to your redirect URL if not set
+const CONNECT_URL = process.env.CONNECT_URL || 'https://busybiblox.github.io/LAV-Redirect/';
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
-
-const SERVER_IP = process.env.SERVER_IP; // e.g. "123.45.67.89:30120"
-const CHANNEL_ID = process.env.CHANNEL_ID; // Discord channel ID for status message
-const BOT_TOKEN = process.env.BOT_TOKEN; // Your Discord bot token
-
-let statusMessageId = null;
-
-async function fetchServerStatus() {
-  try {
-    const infoRes = await fetch(`http://${SERVER_IP}/info.json`);
-    const playersRes = await fetch(`http://${SERVER_IP}/players.json`);
-
-    if (!infoRes.ok || !playersRes.ok) throw new Error('Server unreachable');
-
-    const info = await infoRes.json();
-    const players = await playersRes.json();
-
-    return {
-      online: true,
-      maxPlayers: info.vars?.sv_maxClients || info.vars?.sv_maxclients || 0,
-      currentPlayers: players.length,
-    };
-  } catch {
-    return { online: false };
-  }
-}
 
 async function updateStatusMessage() {
   const channel = await client.channels.fetch(CHANNEL_ID);
   if (!channel) return console.error('Channel not found');
 
-  const status = await fetchServerStatus();
+  const serverIsOnline = true;
 
-  const embed = new EmbedBuilder()
-    .setTitle('FiveM Server Status')
-    .setTimestamp()
-    .setColor(status.online ? 0x00ff00 : 0xff0000);
+  const connectButton = new ButtonBuilder()
+    .setLabel('Connect to FiveM Server')
+    .setStyle(ButtonStyle.Link)
+    .setURL(CONNECT_URL);
 
-  let description;
-  if (status.online) {
-    description = `🟢 **Online**\nPlayers: **${status.currentPlayers}** / **${status.maxPlayers}**`;
-  } else {
-    description = '🔴 **Offline or unreachable**';
-  }
-  embed.setDescription(description);
+  const actionRow = new ActionRowBuilder().addComponents(connectButton);
 
-  const row = new ActionRowBuilder();
-
-  if (status.online) {
-    const connectButton = new ButtonBuilder()
-      .setLabel('Connect to Server')
-      .setStyle(ButtonStyle.Link)
-      .setURL(`https://busybiblox.github.io/LAV-Redirect/`);
-    row.addComponents(connectButton);
-  }
+  const statusText = serverIsOnline ? 'Server is Online ✅' : 'Server is Offline ❌';
 
   try {
-    if (statusMessageId) {
-      const message = await channel.messages.fetch(statusMessageId);
-      await message.edit({ embeds: [embed], components: status.online ? [row] : [] });
-    } else {
-      const message = await channel.send({ embeds: [embed], components: status.online ? [row] : [] });
-      statusMessageId = message.id;
-    }
-  } catch (err) {
-    console.error('Failed to send or edit status message:', err);
+    await channel.send({ content: statusText, components: [actionRow] });
+  } catch (error) {
+    console.error('Error sending status message:', error);
   }
 }
 
-client.once('ready', async () => {
+client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
-
-  await updateStatusMessage();
-
+  updateStatusMessage();
   setInterval(updateStatusMessage, 15 * 60 * 1000);
 });
 
 client.login(BOT_TOKEN);
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+  res.send('Bot is running!');
+});
+
+app.listen(PORT, () => {
+  console.log(`Web server running on port ${PORT}`);
+});
